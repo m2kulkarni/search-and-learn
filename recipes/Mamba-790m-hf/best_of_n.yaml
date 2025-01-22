@@ -1,0 +1,10 @@
+# refer to src/sal/config.py for more options
+
+model_path: state-spaces/mamba-790m-hf
+approach: best_of_n
+n: 4
+search_batch_size: 1
+sort_completed: true
+filter_duplicates: true
+num_samples: 2         # REMOVE THIS LINE TO RUN ON THE WHOLE DATASET
+seed: 0
