@@ -1,5 +1,10 @@
 """HuggingFace Transformers-based LLM implementation."""
 
+import fla
+import os
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
+
 import torch
 from dataclasses import dataclass
 from typing import Optional, List, Union, Dict, Any, Literal
@@ -82,16 +87,33 @@ class LLM:
         if seed is not None:
             torch.manual_seed(seed)
             
+        # Initialize distributed training
+        if torch.cuda.device_count() > 1:
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            dist.init_process_group(backend="nccl")
+            torch.cuda.set_device(local_rank)
+            print(f"Initialized distributed training with local rank {local_rank}")
+            
         self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=trust_remote_code)
-        print(device_map, torch.cuda.is_available())
+        
+        # Load model with device map for multiple GPUs
         self.model = AutoModelForCausalLM.from_pretrained(
             model,
-            device_map="cuda",
+            device_map="balanced" if torch.cuda.device_count() > 1 else "auto",
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
             trust_remote_code=trust_remote_code,
-            offload_folder="offload",  # Offload to disk if needed
+            offload_folder="offload",
         )
-        print("Model Loaded on device", self.model.device)
+        
+        # Wrap model in DDP if using multiple GPUs
+        if torch.cuda.device_count() > 1:
+            self.model = DistributedDataParallel(
+                self.model, 
+                device_ids=[local_rank],
+                output_device=local_rank
+            )
+
+        print(f"Model loaded across {torch.cuda.device_count()} GPUs")
         
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token

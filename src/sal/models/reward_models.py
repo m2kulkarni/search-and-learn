@@ -16,6 +16,9 @@
 from itertools import accumulate
 
 import torch
+import os
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -134,17 +137,37 @@ class RLHFFlow(PRM):
     def load_model_and_tokenizer(
         self, **model_kwargs
     ) -> tuple[PreTrainedModel, PreTrainedTokenizer]:
+        # Initialize distributed training if multiple GPUs
+        if torch.cuda.device_count() > 1:
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            dist.init_process_group(backend="nccl")
+            torch.cuda.set_device(local_rank)
+            print(f"Initialized distributed training with local rank {local_rank}")
+
         tokenizer = AutoTokenizer.from_pretrained(
             "RLHFlow/Llama3.1-8B-PRM-Deepseek-Data"
         )
         print("Tokenizer for PRM loaded")
+
+        # Load model with device map for multiple GPUs
         model = AutoModelForCausalLM.from_pretrained(
             "RLHFlow/Llama3.1-8B-PRM-Deepseek-Data",
-            device_map="auto",
+            device_map="balanced" if torch.cuda.device_count() > 1 else "auto",
             torch_dtype=torch.bfloat16,
             **model_kwargs,
         ).eval()
-        print("Model for PRM loaded on device", model.device)
+
+        # Wrap model in DDP if using multiple GPUs
+        if torch.cuda.device_count() > 1:
+            model = DistributedDataParallel(
+                model,
+                device_ids=[local_rank],
+                output_device=local_rank
+            )
+
+        print(f"Model loaded across {torch.cuda.device_count()} GPUs")
+        
+        # ...existing tokenizer setup code...
         tokenizer.padding_side = "right"
         tokenizer.pad_token = tokenizer.eos_token
         model.config.pad_token_id = model.config.eos_token_id
