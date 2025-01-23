@@ -58,11 +58,16 @@ class RequestOutput:
         logprobs: Optional[List[float]] = None,
         finish_reason: Optional[str] = None
     ):
-        self.text = text
-        self.tokens = tokens
-        self.logprobs = logprobs
-        self.finish_reason = finish_reason
-        self.prompt_token_ids = []  # Added for compatibility
+       self.text = text
+       self.tokens = tokens
+       self.logprobs = logprobs
+       self.finish_reason = finish_reason
+       self.prompt_token_ids = []
+       self.outputs = [self]
+
+    @property
+    def token_ids(self):
+        return self.tokens
 
 class LLM:
     """LLM implementation using Hugging Face Transformers."""
@@ -108,6 +113,7 @@ class LLM:
         prompts: Union[str, List[str]],
         sampling_params: Optional[SamplingParams] = None,
         system_prompt: Optional[str] = None,
+        **kwargs
     ) -> List[RequestOutput]:
         """Generate completions for the prompt(s)."""
         

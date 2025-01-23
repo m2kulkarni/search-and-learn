@@ -137,12 +137,14 @@ class RLHFFlow(PRM):
         tokenizer = AutoTokenizer.from_pretrained(
             "RLHFlow/Llama3.1-8B-PRM-Deepseek-Data"
         )
+        print("Tokenizer for PRM loaded")
         model = AutoModelForCausalLM.from_pretrained(
             "RLHFlow/Llama3.1-8B-PRM-Deepseek-Data",
             device_map="auto",
             torch_dtype=torch.bfloat16,
             **model_kwargs,
         ).eval()
+        print("Model for PRM loaded on device", model.device)
         tokenizer.padding_side = "right"
         tokenizer.pad_token = tokenizer.eos_token
         model.config.pad_token_id = model.config.eos_token_id
