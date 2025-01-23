@@ -1,4 +1,4 @@
-model_path: fla-hub/mamba-1.3B-100B
+model_path: fla-hub/retnet-2.7B-100B
 approach: best_of_n
 n: 32
 search_batch_size: 1

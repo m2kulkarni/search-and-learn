@@ -82,7 +82,7 @@ class LLM:
         if seed is not None:
             torch.manual_seed(seed)
             
-        self.tokenizer = AutoTokenizer.from_pretrained(model)
+        self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=trust_remote_code)
         print(device_map, torch.cuda.is_available())
         self.model = AutoModelForCausalLM.from_pretrained(
             model,
