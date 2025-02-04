@@ -30,7 +30,7 @@ def best_of_n(x, config: Config, llm: LLM, prm: PRM):
             {"role": "system", "content": config.system_prompt},
             {"role": "user", "content": prompt},
         ]
-        for prompt in x["problem"]
+        for prompt in x[config.problem]
     ]
     tokenizer = llm.get_tokenizer()
     # TODO: set the augmented template from a file
@@ -45,8 +45,8 @@ def best_of_n(x, config: Config, llm: LLM, prm: PRM):
     templated_convs = [c for conv in templated_convs for c in [conv] * config.n]
 
     # Initialize empty lists for completions and completion tokens
-    completions = [[] for _ in range(len(x["problem"]))]
-    completion_tokens = [[] for _ in range(len(x["problem"]))]
+    completions = [[] for _ in range(len(x[config.problem]))]
+    completion_tokens = [[] for _ in range(len(x[config.problem]))]
 
     sampling_params = SamplingParams(
         temperature=config.temperature,
@@ -60,9 +60,9 @@ def best_of_n(x, config: Config, llm: LLM, prm: PRM):
         sampling_params=sampling_params,
         use_tqdm=False,
     )
-    if len(responses) != len(x["problem"]) * config.n:
+    if len(responses) != len(x[config.problem]) * config.n:
         raise ValueError(
-            f"Generated {len(responses)} responses instead of {len(x['problem'] * config.n)}"
+            f"Generated {len(responses)} responses instead of {len(x[config.problem] * config.n)}"
         )
 
     for i in range(len(completions)):
@@ -82,7 +82,7 @@ def best_of_n(x, config: Config, llm: LLM, prm: PRM):
         if len(c) != config.n:
             raise ValueError(f"Generated {len(c)} completions instead of {config.n}")
 
-    scores = prm.score(x["problem"], completions)
+    scores = prm.score(x[config.problem], completions)
     agg_scores = [
         [aggregate_scores(s, config.agg_strategy) for s in score] for score in scores
     ]

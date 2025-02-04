@@ -1,5 +1,16 @@
-model_path: fla-hub/transformer-1.3B-100B
+# model_path: fla-hub/transformer-1.3B-100B
+model_path: /n/netscratch/pehlevan_lab/Lab/mkulkarni/results/fla-hub/transformer-1.3B-100B-sft-766140/checkpoint-12288/
 approach: best_of_n
+
+# MATH-500
+# dataset_name: "HuggingFaceH4/MATH-500"
+
+# GSM8K
+dataset_name: "openai/gsm8k"
+dataset_config: "main"
+problem: "question"
+solution: "answer"
+
 n: 32
 search_batch_size: 1
 sort_completed: true

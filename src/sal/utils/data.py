@@ -27,7 +27,7 @@ logger = logging.getLogger()
 
 
 def get_dataset(config: Config) -> Dataset:
-    dataset = load_dataset(config.dataset_name, split=config.dataset_split)
+    dataset = load_dataset(config.dataset_name, name=config.dataset_config, split=config.dataset_split)
 
     if config.dataset_start is not None and config.dataset_end is not None:
         dataset = dataset.select(range(config.dataset_start, config.dataset_end))

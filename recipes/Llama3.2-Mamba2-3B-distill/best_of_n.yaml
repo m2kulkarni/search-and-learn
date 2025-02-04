@@ -1,0 +1,8 @@
+model_path: "JunxiongWang/Llama3.2-Mamba2-3B-distill"
+approach: best_of_n
+hybrid: true
+n: 128
+search_batch_size: 1
+sort_completed: true
+filter_duplicates: true
+seed: 0

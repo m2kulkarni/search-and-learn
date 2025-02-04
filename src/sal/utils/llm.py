@@ -9,6 +9,9 @@ import torch
 from dataclasses import dataclass
 from typing import Optional, List, Union, Dict, Any, Literal
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import sys
+sys.path.append('/n/home01/mkulkarni/projects/inference-scaling/3rdparty/MambaInLlama')
+from mamba_inference.hybrid_wrapper import MambaTransformerHybridModelWrapper
 
 @dataclass
 class SamplingParams:
@@ -18,8 +21,8 @@ class SamplingParams:
     best_of: Optional[int] = None
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
-    temperature: float = 1.0
-    top_p: float = 1.0
+    temperature: float = 0.8
+    top_p: float = 0.9
     top_k: int = -1
     min_p: float = 0.0
     use_beam_search: bool = False
@@ -27,6 +30,7 @@ class SamplingParams:
     early_stopping: bool = False
     stop: Optional[Union[str, List[str]]] = None
     stop_token_ids: Optional[List[int]] = None
+    eos_token_id: Optional[int] = None
     max_tokens: int = 16
     beam_width: Optional[int] = None
     num_iterations: Optional[int] = None
@@ -83,6 +87,7 @@ class LLM:
         trust_remote_code: bool = True,
         device_map: str = "auto",
         seed: Optional[int] = None,
+        hybrid: bool = False
     ):
         if seed is not None:
             torch.manual_seed(seed)
@@ -97,13 +102,20 @@ class LLM:
         self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=trust_remote_code)
         
         # Load model with device map for multiple GPUs
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model,
-            device_map="balanced" if torch.cuda.device_count() > 1 else "auto",
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            trust_remote_code=trust_remote_code,
-            offload_folder="offload",
-        )
+        if hybrid:
+            self.model = MambaTransformerHybridModelWrapper.from_pretrained(
+                model,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            )
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model,
+                device_map="balanced" if torch.cuda.device_count() > 1 else "auto",
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                trust_remote_code=trust_remote_code,
+                offload_folder="offload",
+            )
+        self.model = torch.compile(self.model)
         
         # Wrap model in DDP if using multiple GPUs
         if torch.cuda.device_count() > 1:
@@ -114,7 +126,9 @@ class LLM:
             )
 
         print(f"Model loaded across {torch.cuda.device_count()} GPUs")
-        
+
+        self.model.eval() 
+
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
@@ -171,14 +185,18 @@ class LLM:
         inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
         
         # Prepare generation kwargs
+        # In class LLM, in the generate method, replace the generation_kwargs block with:
         generation_kwargs = {
             "max_new_tokens": sampling_params.max_tokens,
             "num_return_sequences": sampling_params.n,
             "temperature": sampling_params.temperature,
             "top_p": sampling_params.top_p,
-            "do_sample": not sampling_params.use_beam_search and sampling_params.temperature > 0,
+            "top_k": sampling_params.top_k,
+            "min_p": sampling_params.min_p,
+            "do_sample": True,  # Force sampling to be enabled
             "output_scores": True,
             "return_dict_in_generate": True,
+            "eos_token_id": self.tokenizer.eos_token_id
         }
         
         if sampling_params.use_beam_search:
@@ -190,9 +208,11 @@ class LLM:
             
         if sampling_params.stop_token_ids:
             generation_kwargs["eos_token_id"] = sampling_params.stop_token_ids
-            
+
+        generation_kwargs['eos_token_id'] = self.tokenizer.eos_token_id
         # Generate
-        outputs = self.model.generate(**inputs, **generation_kwargs)
+        with torch.inference_mode():
+            outputs = self.model.generate(**inputs, **generation_kwargs)
         
         # Process outputs
         results = []

@@ -25,6 +25,7 @@ from sal.utils.data import get_dataset, save_dataset
 from sal.utils.parser import H4ArgumentParser
 from sal.utils.score import score
 
+
 logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
@@ -41,22 +42,29 @@ APPROACHES = {
 def main():
     parser = H4ArgumentParser(Config)
     config = parser.parse()
-
+    print(config)
     approach_fn = APPROACHES[config.approach]
 
     num_gpus = torch.cuda.device_count()
     print(num_gpus)
-    if "mamba" in config.model_path:
-        enable_prefix_caching = False
-    else:
-        enable_prefix_caching = True
+    # if "mamba" in config.model_path:
+    #     enable_prefix_caching = False
+    # else:
+    #     enable_prefix_caching = True
 
+    if config.hybrid:
+        hybrid = True
+    else:
+        hybrid = False
+
+    print(config.model_path, config.hybrid)
     llm = LLM(
         model=config.model_path,
         seed=config.seed,
         trust_remote_code=True,
-        device_map="auto"
-    )
+        device_map="auto",
+        hybrid=hybrid)
+
     print("Model Loaded on device", llm)
     prm = load_prm(config)
     print("PRM Loaded")
