@@ -23,7 +23,7 @@ class SamplingParams:
     frequency_penalty: float = 0.0
     temperature: float = 0.8
     top_p: float = 0.9
-    top_k: int = -1
+    top_k: int = 0
     min_p: float = 0.0
     use_beam_search: bool = False
     length_penalty: float = 1.0
@@ -37,6 +37,7 @@ class SamplingParams:
     lookahead: Optional[int] = None
     logprobs: Optional[int] = None
     prompt_logprobs: Optional[int] = None
+    include_stop_str_in_output: bool = False
     
     @classmethod
     def from_config(cls, config) -> "SamplingParams":
@@ -73,6 +74,7 @@ class RequestOutput:
        self.finish_reason = finish_reason
        self.prompt_token_ids = []
        self.outputs = [self]
+       self.stop_reason = finish_reason
 
     @property
     def token_ids(self):
@@ -92,12 +94,19 @@ class LLM:
         if seed is not None:
             torch.manual_seed(seed)
             
-        # Initialize distributed training
-        if torch.cuda.device_count() > 1:
-            local_rank = int(os.environ.get("LOCAL_RANK", 0))
-            dist.init_process_group(backend="nccl")
-            torch.cuda.set_device(local_rank)
-            print(f"Initialized distributed training with local rank {local_rank}")
+        # Initialize distributed training only if environment is properly set up
+        self.distributed = False
+        if torch.cuda.device_count() > 1 and "LOCAL_RANK" in os.environ:
+            try:
+                local_rank = int(os.environ["LOCAL_RANK"])
+                if not dist.is_initialized():
+                    dist.init_process_group(backend="nccl")
+                torch.cuda.set_device(local_rank)
+                self.distributed = True
+                print(f"Initialized distributed training with local rank {local_rank}")
+            except Exception as e:
+                print(f"Failed to initialize distributed training: {e}")
+                print("Falling back to single-GPU or CPU mode")
             
         self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=trust_remote_code)
         
@@ -160,20 +169,20 @@ class LLM:
         if isinstance(prompts, str):
             prompts = [prompts]
             
-        # Apply chat template if system prompt is provided
-        if system_prompt:
-            formatted_prompts = []
-            for prompt in prompts:
-                messages = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-                formatted_prompts.append(self.tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True
-                ))
-            prompts = formatted_prompts
+        # # Apply chat template if system prompt is provided
+        # if system_prompt:
+        #     formatted_prompts = []
+        #     for prompt in prompts:
+        #         messages = [
+        #             {"role": "system", "content": system_prompt},
+        #             {"role": "user", "content": prompt}
+        #         ]
+        #         formatted_prompts.append(self.tokenizer.apply_chat_template(
+        #             messages,
+        #             tokenize=False,
+        #             add_generation_prompt=True
+        #         ))
+        #     prompts = formatted_prompts
             
         # Tokenize inputs
         inputs = self.tokenizer(
@@ -196,7 +205,7 @@ class LLM:
             "do_sample": True,  # Force sampling to be enabled
             "output_scores": True,
             "return_dict_in_generate": True,
-            "eos_token_id": self.tokenizer.eos_token_id
+            # "eos_token_id": self.tokenizer.eos_token_id
         }
         
         if sampling_params.use_beam_search:
@@ -204,6 +213,8 @@ class LLM:
                 "num_beams": sampling_params.beam_width or sampling_params.best_of or 4,
                 "early_stopping": sampling_params.early_stopping,
                 "length_penalty": sampling_params.length_penalty,
+                "stop": sampling_params.stop,
+                # "include_stop_str_in_output": sampling_params.include_stop_str_in_output,
             })
             
         if sampling_params.stop_token_ids:

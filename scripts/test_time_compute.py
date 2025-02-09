@@ -14,77 +14,66 @@
 # limitations under the License.
 
 import logging
-
 import torch
+from pathlib import Path
 
 from sal.utils.llm import LLM 
 from sal.config import Config
 from sal.models.reward_models import load_prm
-from sal.search import beam_search, best_of_n, dvts
 from sal.utils.data import get_dataset, save_dataset
 from sal.utils.parser import H4ArgumentParser
 from sal.utils.score import score
-
+from sal.utils.profiler import ComputeProfiler, profile_dataset_generation
 
 logging.basicConfig(level=logging.INFO)
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-
-APPROACHES = {
-    "beam_search": beam_search,
-    "dvts": dvts,
-    "best_of_n": best_of_n,
-}
-
 
 def main():
     parser = H4ArgumentParser(Config)
     config = parser.parse()
     print(config)
-    approach_fn = APPROACHES[config.approach]
+    
+    # Initialize profiler with hardcoded path
+    profiler = ComputeProfiler(
+        model_name=config.model_path.split('/')[-1],
+        method=config.approach,
+        output_dir="/n/netscratch/pehlevan_lab/Lab/mkulkarni/compute_profiles"
+    )
 
     num_gpus = torch.cuda.device_count()
-    print(num_gpus)
-    # if "mamba" in config.model_path:
-    #     enable_prefix_caching = False
-    # else:
-    #     enable_prefix_caching = True
+    print(f"Using {num_gpus} GPUs")
 
-    if config.hybrid:
-        hybrid = True
-    else:
-        hybrid = False
-
-    print(config.model_path, config.hybrid)
+    hybrid = config.hybrid if hasattr(config, 'hybrid') else False
+    print(config.model_path, hybrid)
+    
     llm = LLM(
         model=config.model_path,
         seed=config.seed,
         trust_remote_code=True,
         device_map="auto",
-        hybrid=hybrid)
-
+        hybrid=hybrid
+    )
     print("Model Loaded on device", llm)
+    
     prm = load_prm(config)
     print("PRM Loaded")
 
     dataset = get_dataset(config)
     print("Dataset Loaded")
-    dataset = dataset.map(
-        approach_fn,
-        batched=True,
-        batch_size=config.search_batch_size,
-        fn_kwargs={"config": config, "llm": llm, "prm": prm},
-        desc="Running search",
-        load_from_cache_file=True,
-    )
-    print("Dataset Mapped")
+    
+    # Run generation with profiling
+    dataset = profile_dataset_generation(dataset, config, llm, prm, profiler)
+    print("Dataset Generation Completed")
+    
+    # Score and save results
     dataset = score(dataset, config)
-
     save_dataset(dataset, config)
+    
+    # Save profiling statistics
+    profiler.save_stats()
+    
     logger.info("Done 🔥!")
-
 
 if __name__ == "__main__":
     main()
