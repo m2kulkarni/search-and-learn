@@ -257,6 +257,58 @@ class ComputeProfiler:
             json.dump(self.stats, f, indent=2)
         logger.info(f"Saved compute statistics to {output_file}")
 
+    def calculate_flops(self, model, input_length: int, output_length: int) -> float:
+        """Calculate FLOPS for any PyTorch model using fvcore's FlopCountAnalysis"""
+        try:
+            import torch
+            from fvcore.nn import FlopCountAnalysis
+            
+            # Create dummy input
+            device = next(model.parameters()).device
+            batch_size = 1
+            seq_len = input_length + output_length
+            
+            # Try to determine input shape from model
+            if hasattr(model, 'config'):
+                vocab_size = getattr(model.config, 'vocab_size', 1000)
+            else:
+                vocab_size = 1000  # Default fallback
+                
+            dummy_input = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+            
+            # Calculate FLOPS
+            try:
+                flops = FlopCountAnalysis(model, dummy_input)
+                total_flops = flops.total()
+                
+                # Log detailed analysis if needed
+                logger.info(f"FLOPS by operator type:")
+                logger.info(flops.by_operator_with_module())
+                
+                return total_flops
+                
+            except Exception as e:
+                logger.warning(f"FLOPS calculation with token input failed: {e}")
+                # Fallback to hidden state input
+                if hasattr(model, 'config'):
+                    hidden_size = getattr(model.config, 'hidden_size', 
+                                       getattr(model.config, 'd_model', 768))
+                else:
+                    hidden_size = 768  # Default fallback
+                    
+                dummy_input = torch.randn(batch_size, seq_len, hidden_size, device=device)
+                flops = FlopCountAnalysis(model, dummy_input)
+                total_flops = flops.total()
+                
+                logger.info(f"FLOPS by operator type (fallback):")
+                logger.info(flops.by_operator_with_module())
+                
+                return total_flops
+                
+        except Exception as e:
+            logger.warning(f"Failed to calculate FLOPS: {e}")
+            return 0
+
 def profile_dataset_generation(dataset, config, llm, prm, profiler):
     """Wrapper to profile the dataset generation process"""
     # Set dataset range in profiler

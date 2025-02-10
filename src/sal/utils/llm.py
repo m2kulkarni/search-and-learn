@@ -12,6 +12,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import sys
 sys.path.append('/n/home01/mkulkarni/projects/inference-scaling/3rdparty/MambaInLlama')
 from mamba_inference.hybrid_wrapper import MambaTransformerHybridModelWrapper
+from mamba2_inference.hybrid_wrapper import MambaTransformerHybridModelWrapper as Mamba2TransformerHybridModelWrapper
 
 @dataclass
 class SamplingParams:
@@ -112,10 +113,16 @@ class LLM:
         
         # Load model with device map for multiple GPUs
         if hybrid:
-            self.model = MambaTransformerHybridModelWrapper.from_pretrained(
-                model,
-                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            )
+            if "mamba2" in model.lower():
+                self.model = Mamba2TransformerHybridModelWrapper.from_pretrained(
+                    model,
+                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                )
+            else:
+                self.model = MambaTransformerHybridModelWrapper.from_pretrained(
+                    model,
+                    torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+                )
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model,
