@@ -1,7 +1,7 @@
-model_path: "JunxiongWang/Mamba2InLlama_0_50"
+model_path: "JunxiongWang/MambaInLlama_0_50"
 approach: best_of_n
 hybrid: true
-n: 128
+n: 32
 search_batch_size: 1
 sort_completed: true
 filter_duplicates: true

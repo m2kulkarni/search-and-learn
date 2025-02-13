@@ -131,6 +131,7 @@ class LLM:
                 trust_remote_code=trust_remote_code,
                 offload_folder="offload",
             )
+        print(f"Model parameters: {sum(p.numel() for p in self.model.parameters())/1e9:.2f}B")
         self.model = torch.compile(self.model)
         
         # Wrap model in DDP if using multiple GPUs

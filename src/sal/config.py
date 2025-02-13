@@ -56,7 +56,7 @@ class Config:
     custom_chat_template = "{% if messages[0]['role'] == 'system' %}\n{% set system_message = messages[0]['content']|trim %}\n{% set messages = messages[1:] %}\n{% else %}\n{% set system_message = '' %}\n{% endif %}\n<|start_header_id|>system<|end_header_id|>\n{{ system_message }}<|eot_id|>\n{% for message in messages %}\n{% if message['role'] == 'user' %}\n<|start_header_id|>user<|end_header_id|>\n{{ message['content'] }}<|eot_id|>\n{% elif message['role'] == 'assistant' %}\n<|start_header_id|>assistant<|end_header_id|>\n{{ message['content'] }}<|eot_id|>\n{% endif %}\n{% endfor %}\n{% if add_generation_prompt %}\n<|start_header_id|>assistant<|end_header_id|>\n{% endif %}"
     # Search Related Options
     n: int = 4
-    temperature: float = 0.5
+    temperature: float = 0.8
     top_p: float = 1.0
     prm_batch_size: int = 1
     search_batch_size: int = 1

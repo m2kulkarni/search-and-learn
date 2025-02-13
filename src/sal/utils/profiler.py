@@ -68,6 +68,20 @@ class ComputeProfiler:
             "avg_gpu_utilization": 0,
             "peak_gpu_utilization": 0,
             
+            # Throughput metrics
+            "gpu_throughput": {
+                "theoretical_peak_flops": 0,  # Based on GPU architecture
+                "estimated_achieved_flops": 0,  # Based on utilization
+                "flops_utilization_percent": 0,  # Percentage of peak achieved
+                "memory_bandwidth_gbps": 0,  # Memory bandwidth in GB/s
+                "compute_memory_ratio": 0,  # FLOPS/byte ratio
+                "precision": "",
+                "tensor_cores": 0,
+                "l2_cache_kb": 0,
+                "memory_gb": 0,
+                "roofline_intensity": 0,  # FLOPS/byte at peak
+            },
+            
             # Generation metrics
             "generations": 0,
             "tokens_generated": 0,
@@ -106,6 +120,42 @@ class ComputeProfiler:
         self.start_event = torch.cuda.Event(enable_timing=True)
         self.end_event = torch.cuda.Event(enable_timing=True)
         self.batch_start_time = None
+        
+        # Initialize theoretical peak FLOPS and memory bandwidth based on GPU
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0).lower()
+            
+            # GPU specifications (theoretical peaks)
+            gpu_specs = {
+                'a100': {
+                    'peak_flops': 624e12,  # 624 TFLOPS BF16
+                    'memory_bandwidth': 2039,  # GB/s
+                    'tensor_cores': 432,
+                    'l2_cache': 40960,  # KB
+                    'memory': 80,  # GB
+                },
+                'h100': {
+                    'peak_flops': 1979e12,  # 1979 TFLOPS BF16
+                    'memory_bandwidth': 3350,  # GB/s
+                    'tensor_cores': 528,
+                    'l2_cache': 51200,  # KB
+                    'memory': 80,  # GB
+                },
+            }
+            
+            # Find matching GPU and set specs
+            for gpu_type, specs in gpu_specs.items():
+                if gpu_type in gpu_name:
+                    self.stats["gpu_throughput"].update({
+                        "theoretical_peak_flops": specs["peak_flops"],
+                        "memory_bandwidth_gbps": specs["memory_bandwidth"],
+                        "precision": "bf16" if gpu_type in ['h100', 'a100'] else "fp16",
+                        "tensor_cores": specs.get("tensor_cores", 0),
+                        "l2_cache_kb": specs.get("l2_cache", 0),
+                        "memory_gb": specs.get("memory", 0),
+                        "roofline_intensity": specs["peak_flops"] / (specs["memory_bandwidth"] * 1e9),  # FLOPS/byte at peak
+                    })
+                    break
     
     def set_dataset_range(self, start: int, end: int, total: int):
         """Set the dataset range this job is processing"""
@@ -162,6 +212,50 @@ class ComputeProfiler:
             except:
                 pass
     
+    def update_throughput_metrics(self, batch_time_s: float, batch_memory_gb: float):
+        """Update throughput metrics based on batch statistics"""
+        if not torch.cuda.is_available():
+            return
+            
+        try:
+            # Get latest GPU utilization
+            current_util = self.stats["gpu_utilization_samples"][-1] if self.stats["gpu_utilization_samples"] else 0
+            
+            # Calculate achieved FLOPS based on utilization and actual timing
+            theoretical_peak = self.stats["gpu_throughput"]["theoretical_peak_flops"]
+            
+            # For transformer models, typical arithmetic intensity is ~50-100 FLOPS/byte
+            # Use this to better estimate actual FLOPS from memory throughput
+            if batch_time_s > 0:
+                memory_throughput = batch_memory_gb / batch_time_s  # GB/s
+                bytes_per_second = memory_throughput * 1e9  # Convert GB/s to bytes/s
+                
+                # Estimate FLOPS two ways:
+                # 1. From GPU utilization
+                flops_from_util = theoretical_peak * (current_util / 100.0)
+                
+                # 2. From memory bandwidth and arithmetic intensity
+                # Assume arithmetic intensity of 60 FLOPS/byte for transformer models
+                flops_from_memory = bytes_per_second * 60
+                
+                # Use the minimum of the two estimates for a conservative measure
+                achieved_flops = min(flops_from_util, flops_from_memory)
+                
+                # Update throughput stats
+                self.stats["gpu_throughput"].update({
+                    "estimated_achieved_flops": achieved_flops,
+                    "flops_utilization_percent": (achieved_flops / theoretical_peak) * 100 if theoretical_peak > 0 else 0,
+                    "memory_bandwidth_gbps": memory_throughput,
+                    "compute_memory_ratio": achieved_flops / bytes_per_second if bytes_per_second > 0 else 0,
+                    "arithmetic_intensity": 60,  # FLOPS/byte assumption for transformer
+                    "memory_bound": flops_from_memory < flops_from_util,  # True if memory is the bottleneck
+                    "estimated_flops_from_util": flops_from_util,
+                    "estimated_flops_from_memory": flops_from_memory,
+                })
+                
+        except Exception as e:
+            logger.warning(f"Failed to update throughput metrics: {e}")
+    
     def end(self, num_generations: int, num_tokens: int, failed_generations: int = 0, error_msg: Optional[str] = None):
         """End profiling a batch"""
         if torch.cuda.is_available():
@@ -179,6 +273,11 @@ class ComputeProfiler:
         if torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024 / 1024
             memory_percent = (current_memory / total_memory) * 100 if total_memory > 0 else 0
+            
+            # Update throughput metrics
+            batch_time_s = cuda_time_ns / 1e9  # Convert ns to s
+            batch_memory_gb = current_memory / 1024  # Convert MB to GB
+            self.update_throughput_metrics(batch_time_s, batch_memory_gb)
         else:
             memory_percent = 0
         
